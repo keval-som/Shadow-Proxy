@@ -1,0 +1,161 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shadow Proxy — Infrastructure Stack
+#
+# Usage:
+#   Start infra only (during development):
+#     docker compose up -d postgres-primary postgres-replica redis rabbitmq
+#
+#   Start full stack including the proxy (after `mvn package`):
+#     docker compose --profile proxy up -d
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ── PostgreSQL Primary (Writes) ────────────────────────────────────────────
+  postgres-primary:
+    image: registry.hub.docker.com/bitnami/postgresql:latest
+    container_name: shadow-postgres-primary
+    environment:
+      POSTGRESQL_USERNAME: shadowuser
+      POSTGRESQL_PASSWORD: shadowpass
+      POSTGRESQL_DATABASE: shadowdb
+      POSTGRESQL_POSTGRES_PASSWORD: adminpass
+      # Streaming replication config
+      POSTGRESQL_REPLICATION_MODE: master
+      POSTGRESQL_REPLICATION_USER: replicator
+      POSTGRESQL_REPLICATION_PASSWORD: replicatorpass
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_primary_data:/bitnami/postgresql
+      - ./docker/init-scripts:/docker-entrypoint-initdb.d:ro
+    networks:
+      - shadow-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shadowuser -d shadowdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── PostgreSQL Replica (Reads) ─────────────────────────────────────────────
+  postgres-replica:
+    image: registry.hub.docker.com/bitnami/postgresql:latest
+    container_name: shadow-postgres-replica
+    environment:
+      POSTGRESQL_REPLICATION_MODE: slave
+      POSTGRESQL_MASTER_HOST: postgres-primary
+      POSTGRESQL_MASTER_PORT_NUMBER: 5432
+      POSTGRESQL_REPLICATION_USER: replicator
+      POSTGRESQL_REPLICATION_PASSWORD: replicatorpass
+      POSTGRESQL_PASSWORD: shadowpass
+      POSTGRESQL_POSTGRES_PASSWORD: adminpass
+    ports:
+      - "5434:5432"
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    networks:
+      - shadow-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shadowuser"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── Redis (L2 Cache + Session Store) ──────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: shadow-redis
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --loglevel warning
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - shadow-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── RabbitMQ (Audit Telemetry) ─────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: shadow-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: shadowmq
+      RABBITMQ_DEFAULT_PASS: shadowmqpass
+      RABBITMQ_DEFAULT_VHOST: shadow
+    ports:
+      - "5672:5672" # AMQP
+      - "15672:15672" # Management UI → http://localhost:15672
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - shadow-net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ── Shadow Proxy (activated via --profile proxy) ───────────────────────────
+  shadow-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shadow-proxy
+    profiles:
+      - proxy
+    ports:
+      - "5432:5432"
+    environment:
+      PROXY_HOST: 0.0.0.0
+      PROXY_PORT: 5432
+      DB_PRIMARY_HOST: postgres-primary
+      DB_PRIMARY_PORT: 5432
+      DB_REPLICA_HOST: postgres-replica
+      DB_REPLICA_PORT: 5432
+      DB_NAME: shadowdb
+      DB_USERNAME: shadowuser
+      DB_PASSWORD: shadowpass
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: shadowmq
+      RABBITMQ_PASSWORD: shadowmqpass
+      RABBITMQ_VHOST: shadow
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      postgres-replica:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - shadow-net
+    restart: unless-stopped
+
+# ─────────────────────────────────────────────────────────────────────────────
+volumes:
+  postgres_primary_data:
+  postgres_replica_data:
+  redis_data:
+  rabbitmq_data:
+
+networks:
+  shadow-net:
+    driver: bridge
