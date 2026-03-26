@@ -8,6 +8,13 @@ import com.shadow.proxy.protocol.CommandType;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.ByteToMessageDecoder;
+import net.sf.jsqlparser.JSQLParserException;
+import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import net.sf.jsqlparser.statement.Statement;
+import net.sf.jsqlparser.statement.delete.Delete;
+import net.sf.jsqlparser.statement.insert.Insert;
+import net.sf.jsqlparser.statement.select.Select;
+import net.sf.jsqlparser.statement.update.Update;
 
 public class PostgresCommandDecoder extends ByteToMessageDecoder {
 
@@ -62,18 +69,28 @@ public class PostgresCommandDecoder extends ByteToMessageDecoder {
     }
 
     private CommandType classify(String sql) {
+        try {
+            Statement stmt = CCJSqlParserUtil.parse(sql);
+            if (stmt instanceof Select) return CommandType.SELECT;
+            if (stmt instanceof Insert) return CommandType.INSERT;
+            if (stmt instanceof Update) return CommandType.UPDATE;
+            if (stmt instanceof Delete) return CommandType.DELETE;
+            return CommandType.DDL;
+        } catch (JSQLParserException e) {
+            // JSQLParser can't parse CONTROL statements (BEGIN, COMMIT, ROLLBACK)
+            return classifyByPrefix(sql);
+        }
+    }
+
+    private CommandType classifyByPrefix(String sql) {
         String upper = sql.stripLeading().toUpperCase();
-        if (upper.startsWith("SELECT"))
-            return CommandType.SELECT;
-        if (upper.startsWith("INSERT"))
-            return CommandType.INSERT;
-        if (upper.startsWith("UPDATE"))
-            return CommandType.UPDATE;
-        if (upper.startsWith("DELETE"))
-            return CommandType.DELETE;
-        if (upper.startsWith("BEGIN") || upper.startsWith("COMMIT")
-                || upper.startsWith("ROLLBACK"))
-            return CommandType.CONTROL;
+        if (upper.startsWith("SELECT"))   return CommandType.SELECT;
+        if (upper.startsWith("INSERT"))   return CommandType.INSERT;
+        if (upper.startsWith("UPDATE"))   return CommandType.UPDATE;
+        if (upper.startsWith("DELETE"))   return CommandType.DELETE;
+        if (upper.startsWith("BEGIN")
+         || upper.startsWith("COMMIT")
+         || upper.startsWith("ROLLBACK")) return CommandType.CONTROL;
         return CommandType.DDL;
     }
 }
