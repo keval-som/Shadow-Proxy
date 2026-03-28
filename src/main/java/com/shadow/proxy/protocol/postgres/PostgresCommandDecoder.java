@@ -71,10 +71,14 @@ public class PostgresCommandDecoder extends ByteToMessageDecoder {
     private CommandType classify(String sql) {
         try {
             Statement stmt = CCJSqlParserUtil.parse(sql);
-            if (stmt instanceof Select) return CommandType.SELECT;
-            if (stmt instanceof Insert) return CommandType.INSERT;
-            if (stmt instanceof Update) return CommandType.UPDATE;
-            if (stmt instanceof Delete) return CommandType.DELETE;
+            if (stmt instanceof Select)
+                return CommandType.SELECT;
+            if (stmt instanceof Insert)
+                return CommandType.INSERT;
+            if (stmt instanceof Update)
+                return CommandType.UPDATE;
+            if (stmt instanceof Delete)
+                return CommandType.DELETE;
             return CommandType.DDL;
         } catch (JSQLParserException e) {
             // JSQLParser can't parse CONTROL statements (BEGIN, COMMIT, ROLLBACK)
@@ -84,13 +88,18 @@ public class PostgresCommandDecoder extends ByteToMessageDecoder {
 
     private CommandType classifyByPrefix(String sql) {
         String upper = sql.stripLeading().toUpperCase();
-        if (upper.startsWith("SELECT"))   return CommandType.SELECT;
-        if (upper.startsWith("INSERT"))   return CommandType.INSERT;
-        if (upper.startsWith("UPDATE"))   return CommandType.UPDATE;
-        if (upper.startsWith("DELETE"))   return CommandType.DELETE;
+        if (upper.startsWith("SELECT"))
+            return CommandType.SELECT;
+        if (upper.startsWith("INSERT"))
+            return CommandType.INSERT;
+        if (upper.startsWith("UPDATE"))
+            return CommandType.UPDATE;
+        if (upper.startsWith("DELETE"))
+            return CommandType.DELETE;
         if (upper.startsWith("BEGIN")
-         || upper.startsWith("COMMIT")
-         || upper.startsWith("ROLLBACK")) return CommandType.CONTROL;
+                || upper.startsWith("COMMIT")
+                || upper.startsWith("ROLLBACK"))
+            return CommandType.CONTROL;
         return CommandType.DDL;
     }
 }
