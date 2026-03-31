@@ -1,86 +1,149 @@
 package com.shadow.proxy.resilience;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Sliding-window circuit breaker, one instance per BackendNode.
+ *
+ * State machine:
+ * CLOSED ──(failure rate >= threshold)──► OPEN
+ * ▲ │
+ * │ (probe succeeds) │ (openDurationMs elapsed)
+ * └────────── HALF_OPEN ◄─────────────────┘
+ * │
+ * └─(probe fails)──► OPEN
+ */
 public class CircuitBreaker {
 
-    public enum State { CLOSED, OPEN, HALF_OPEN }
+    private static final Logger log = LoggerFactory.getLogger(CircuitBreaker.class);
 
-    private final String nodeId;           // which node this protects
-    private final int    windowSize;       // e.g. 20 requests
-    private final int    failureThreshold; // e.g. 50 → 50%
-    private final long   openDurationMs;   // e.g. 30_000
-
-    // Sliding window ring buffer — true = failure
-    private final boolean[] window;
-    private int  windowIndex  = 0;
-    private int  failureCount = 0;
-
-    // State machine
-    private volatile State state = State.CLOSED;
-    private long openedAt = 0L; // timestamp when circuit opened
-
-    public CircuitBreaker(String nodeId, int windowSize,
-                          int failureThresholdPct, long openDurationMs) {
-        this.nodeId           = nodeId;
-        this.windowSize       = windowSize;
-        this.failureThreshold = failureThresholdPct;
-        this.openDurationMs   = openDurationMs;
-        this.window           = new boolean[windowSize];
+    public enum State {
+        CLOSED, OPEN, HALF_OPEN
     }
 
-    // ── Called by BackendHandler before attempting a DB call ─────────────────
+    private final String nodeId;
+    private final int windowSize; // number of requests in sliding window
+    private final int failureThresholdPct; // e.g. 50 → trip at 50% failures
+    private final long openDurationMs; // how long to stay OPEN before probing
+
+    // Ring buffer: true = failure, false = success
+    private final boolean[] window;
+    private int windowIndex = 0;
+    private int failureCount = 0;
+    private int totalRecorded = 0; // guard: don't trip before window is full
+
+    private volatile State state = State.CLOSED;
+    private long openedAt = 0L;
+
+    public CircuitBreaker(String nodeId,
+            int windowSize,
+            int failureThresholdPct,
+            long openDurationMs) {
+        this.nodeId = nodeId;
+        this.windowSize = windowSize;
+        this.failureThresholdPct = failureThresholdPct;
+        this.openDurationMs = openDurationMs;
+        this.window = new boolean[windowSize];
+    }
+
+    // ── Public API ────────────────────────────────────────────────────────────
+
+    /**
+     * Called before attempting a backend DB call.
+     * Returns true if the request should proceed, false to fail-fast.
+     */
     public synchronized boolean allowRequest() {
         return switch (state) {
-            case CLOSED    -> true;
-            case OPEN      -> tryTransitionToHalfOpen();
-            case HALF_OPEN -> false; // only 1 probe allowed at a time
+            case CLOSED -> true;
+            case OPEN -> tryTransitionToHalfOpen();
+            case HALF_OPEN -> false; // only one probe in flight at a time
         };
     }
 
-    // ── Called by BackendHandler after a DB call succeeds ────────────────────
+    /** Called when the backend call completes successfully. */
     public synchronized void recordSuccess() {
-        recordResult(false); // false = not a failure
+        recordResult(false);
         if (state == State.HALF_OPEN) {
             transitionTo(State.CLOSED);
         }
     }
 
-    // ── Called by BackendHandler after a DB call fails ───────────────────────
+    /** Called when the backend call fails (timeout, connection refused, etc.). */
     public synchronized void recordFailure() {
         recordResult(true);
         if (state == State.HALF_OPEN) {
-            transitionTo(State.OPEN); // probe failed → re-open
-        } else if (failureRatePct() >= failureThreshold) {
+            transitionTo(State.OPEN);
+        } else if (state == State.CLOSED && isWindowFull() && failureRatePct() >= failureThresholdPct) {
             transitionTo(State.OPEN);
         }
     }
 
-    public State getState() { return state; }
+    public State getState() {
+        return state;
+    }
 
-    // ── Private helpers ──────────────────────────────────────────────────────
+    public String getNodeId() {
+        return nodeId;
+    }
 
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Writes a result into the ring buffer, maintaining the failure count.
+     * Overwrites the oldest entry, subtracting it before adding the new one.
+     */
     private void recordResult(boolean isFailure) {
-        // subtract old value before overwriting
-        // hint: if window[windowIndex] was a failure, decrement failureCount
-        // then set window[windowIndex] = isFailure
-        // add to failureCount if isFailure
-        // advance windowIndex
+        // Remove contribution of the slot we are about to overwrite
+        if (window[windowIndex]) {
+            failureCount--;
+        }
+
+        // Write new result
+        window[windowIndex] = isFailure;
+        if (isFailure) {
+            failureCount++;
+        }
+
+        // Advance ring buffer pointer (wraps around at windowSize)
+        windowIndex = (windowIndex + 1) % windowSize;
+
+        if (totalRecorded < windowSize) {
+            totalRecorded++;
+        }
     }
 
+    /** Failure rate as an integer percentage across the current window. */
     private int failureRatePct() {
-        // (failureCount * 100) / windowSize
+        int effective = Math.min(totalRecorded, windowSize);
+        if (effective == 0)
+            return 0;
+        return (failureCount * 100) / effective;
     }
 
+    /** True once the window has seen at least windowSize requests. */
+    private boolean isWindowFull() {
+        return totalRecorded >= windowSize;
+    }
+
+    /**
+     * When OPEN: checks whether enough time has passed to attempt a probe.
+     * If yes, transitions to HALF_OPEN and allows the request through.
+     */
     private boolean tryTransitionToHalfOpen() {
-        // check if openDurationMs has elapsed since openedAt
-        // if yes → transitionTo(HALF_OPEN), return true
-        // if no  → return false (still blocked)
+        if (System.currentTimeMillis() - openedAt >= openDurationMs) {
+            transitionTo(State.HALF_OPEN);
+            return true;
+        }
+        return false;
     }
 
     private void transitionTo(State next) {
-        // set state = next
-        // if next == OPEN: record openedAt = System.currentTimeMillis()
-        // log the transition
+        State previous = this.state;
+        this.state = next;
+        if (next == State.OPEN) {
+            openedAt = System.currentTimeMillis();
+        }
+        log.warn("CircuitBreaker [{}]: {} → {}", nodeId, previous, next);
     }
-} {
-    
 }
