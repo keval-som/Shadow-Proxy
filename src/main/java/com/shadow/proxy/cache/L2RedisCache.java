@@ -86,7 +86,7 @@ public class L2RedisCache {
     public CompletableFuture<Void> invalidateAll() {
         // Use SCAN to avoid blocking Redis with FLUSHDB
         String pattern = KEY_PREFIX + "*";
-        return async.keys((KEY_PREFIX + "*").getBytes())
+        return async.keys((pattern).getBytes())
                 .thenCompose(keys -> {
                     if (keys.isEmpty())
                         return CompletableFuture.completedFuture(null);

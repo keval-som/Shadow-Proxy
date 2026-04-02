@@ -21,11 +21,19 @@ public class PostgresCommandDecoder extends ByteToMessageDecoder {
     private boolean startupComplete = false;
 
     private void handleStartup(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {
-        // read and discard the startup packet
         int length = in.readInt();
         in.skipBytes(length - 4);
         startupComplete = true;
-        // AuthenticationOk + ReadyForQuery will be written by the encoder
+
+        // Respond immediately: AuthenticationOk ('R') then ReadyForQuery ('Z')
+        ByteBuf response = ctx.alloc().buffer(13);
+        response.writeByte('R');  // AuthenticationOk
+        response.writeInt(8);
+        response.writeInt(0);     // 0 = success
+        response.writeByte('Z');  // ReadyForQuery
+        response.writeInt(5);
+        response.writeByte('I');  // 'I' = idle (not in a transaction)
+        ctx.writeAndFlush(response);
     }
 
     @Override
