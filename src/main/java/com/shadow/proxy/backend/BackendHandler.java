@@ -6,6 +6,8 @@ import com.shadow.proxy.resilience.CircuitBreaker;
 import com.shadow.proxy.routing.BackendNode;
 import com.shadow.proxy.routing.NodeRegistry;
 import com.shadow.proxy.routing.RoutingStrategy;
+import com.shadow.proxy.telemetry.AuditEvent;
+import com.shadow.proxy.telemetry.RabbitMQAuditProducer;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -39,16 +41,19 @@ public class BackendHandler extends ChannelInboundHandlerAdapter {
     private static final Executor JDBC_EXECUTOR =
             Executors.newVirtualThreadPerTaskExecutor();
 
-    private final NodeRegistry                     nodeRegistry;
-    private final RoutingStrategy                  router;
+    private final NodeRegistry                       nodeRegistry;
+    private final RoutingStrategy                    router;
     private final Map<String, BackendConnectionPool> pools;
+    private final RabbitMQAuditProducer              auditProducer;
 
     public BackendHandler(NodeRegistry nodeRegistry,
                           RoutingStrategy router,
-                          Map<String, BackendConnectionPool> pools) {
-        this.nodeRegistry = nodeRegistry;
-        this.router       = router;
-        this.pools        = pools;
+                          Map<String, BackendConnectionPool> pools,
+                          RabbitMQAuditProducer auditProducer) {
+        this.nodeRegistry  = nodeRegistry;
+        this.router        = router;
+        this.pools         = pools;
+        this.auditProducer = auditProducer;
     }
 
     @Override
@@ -92,15 +97,24 @@ public class BackendHandler extends ChannelInboundHandlerAdapter {
             return;
         }
 
+        long start = System.currentTimeMillis();
         try (Connection conn = pool.getConnection()) {
             ByteBuf response = dispatch(ctx, conn, command);
+            long latency = System.currentTimeMillis() - start;
             breaker.recordSuccess();
             ctx.writeAndFlush(response);
-            log.debug("Query executed on node={} sql={}", target.id(),
-                    abbreviated(command.sql()));
+            auditProducer.publish(AuditEvent.success(
+                    command.sessionId(), command.type(),
+                    command.sql(), target.id(), false, latency));
+            log.debug("Query executed on node={} latency={}ms sql={}",
+                    target.id(), latency, abbreviated(command.sql()));
         } catch (Exception e) {
+            long latency = System.currentTimeMillis() - start;
             breaker.recordFailure();
             log.error("JDBC error on node={}: {}", target.id(), e.getMessage());
+            auditProducer.publish(AuditEvent.failure(
+                    command.sessionId(), command.type(),
+                    command.sql(), target.id(), latency, e.getMessage()));
             writeError(ctx, "08006", e.getMessage());
         }
     }

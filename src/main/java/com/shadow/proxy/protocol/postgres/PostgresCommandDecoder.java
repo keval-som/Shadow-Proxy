@@ -4,6 +4,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import com.shadow.proxy.protocol.CommandType;
+import com.shadow.proxy.state.SessionManager;
+import com.shadow.proxy.state.SessionState;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
@@ -18,22 +20,49 @@ import net.sf.jsqlparser.statement.update.Update;
 
 public class PostgresCommandDecoder extends ByteToMessageDecoder {
 
+    private final SessionManager sessionManager;
     private boolean startupComplete = false;
+    private String  sessionId       = null;
+
+    public PostgresCommandDecoder(SessionManager sessionManager) {
+        this.sessionManager = sessionManager;
+    }
 
     private void handleStartup(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {
         int length = in.readInt();
         in.skipBytes(length - 4);
         startupComplete = true;
 
+        // Derive a stable session ID from the channel's unique ID
+        sessionId = ctx.channel().id().asLongText();
+
+        // Create and persist the session asynchronously
+        SessionState session = SessionState.authenticated(sessionId, "client", "shadowdb");
+        sessionManager.save(session).whenComplete((v, ex) -> {
+            if (ex != null) {
+                // Non-fatal: proxy continues even if Redis is temporarily down
+                ctx.channel().attr(io.netty.util.AttributeKey.valueOf("sessionId"))
+                        .set(sessionId);
+            }
+        });
+
         // Respond immediately: AuthenticationOk ('R') then ReadyForQuery ('Z')
         ByteBuf response = ctx.alloc().buffer(13);
-        response.writeByte('R');  // AuthenticationOk
+        response.writeByte('R');
         response.writeInt(8);
-        response.writeInt(0);     // 0 = success
-        response.writeByte('Z');  // ReadyForQuery
+        response.writeInt(0);
+        response.writeByte('Z');
         response.writeInt(5);
-        response.writeByte('I');  // 'I' = idle (not in a transaction)
+        response.writeByte('I');
         ctx.writeAndFlush(response);
+    }
+
+    @Override
+    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+        if (sessionId != null) {
+            sessionManager.delete(sessionId);
+        }
+        super.channelInactive(ctx);
     }
 
     @Override
@@ -73,7 +102,7 @@ public class PostgresCommandDecoder extends ByteToMessageDecoder {
         in.skipBytes(1); // null terminator
 
         CommandType type = classify(sql);
-        out.add(PostgresCommand.of(type, sql, "session-placeholder"));
+        out.add(PostgresCommand.of(type, sql, sessionId != null ? sessionId : "unknown"));
     }
 
     private CommandType classify(String sql) {

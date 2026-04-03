@@ -12,21 +12,22 @@ import io.netty.buffer.ByteBufAllocator;
  * Encodes JDBC results into PostgreSQL wire protocol v3 messages.
  *
  * Message layout reference:
- *   RowDescription  'T'  → column names and type OIDs
- *   DataRow         'D'  → one message per row
- *   CommandComplete 'C'  → "SELECT 5", "INSERT 0 1", etc.
- *   ReadyForQuery   'Z'  → 'I' (idle)
- *   ErrorResponse   'E'  → severity + message fields
+ * RowDescription 'T' → column names and type OIDs
+ * DataRow 'D' → one message per row
+ * CommandComplete 'C' → "SELECT 5", "INSERT 0 1", etc.
+ * ReadyForQuery 'Z' → 'I' (idle)
+ * ErrorResponse 'E' → severity + message fields
  */
 public final class PostgresWireEncoder {
 
     // Text format (0) for all columns; OID 0 = unknown type (client infers)
-    private static final int  TEXT_FORMAT = 0;
-    private static final int  TYPE_OID    = 0;
-    private static final int  TYPE_LEN    = -1;  // variable
-    private static final int  TYPE_MOD    = -1;  // no modifier
+    private static final int TEXT_FORMAT = 0;
+    private static final int TYPE_OID = 0;
+    private static final int TYPE_LEN = -1; // variable
+    private static final int TYPE_MOD = -1; // no modifier
 
-    private PostgresWireEncoder() {}
+    private PostgresWireEncoder() {
+    }
 
     // ── ReadyForQuery ('Z') ──────────────────────────────────────────────────
 
@@ -44,7 +45,7 @@ public final class PostgresWireEncoder {
             throws SQLException {
         ResultSetMetaData meta = rs.getMetaData();
         int colCount = meta.getColumnCount();
-        ByteBuf buf  = alloc.buffer(256);
+        ByteBuf buf = alloc.buffer(256);
 
         // ── RowDescription ───────────────────────────────────────────────────
         // We write into a temp buf first so we know the total length
@@ -52,11 +53,11 @@ public final class PostgresWireEncoder {
         td.writeShort(colCount);
         for (int i = 1; i <= colCount; i++) {
             writeNullString(td, meta.getColumnName(i));
-            td.writeInt(0);           // table OID (0 = not from a table)
-            td.writeShort(0);         // attribute number
-            td.writeInt(TYPE_OID);    // data type OID
-            td.writeShort(TYPE_LEN);  // type size
-            td.writeInt(TYPE_MOD);    // type modifier
+            td.writeInt(0); // table OID (0 = not from a table)
+            td.writeShort(0); // attribute number
+            td.writeInt(TYPE_OID); // data type OID
+            td.writeShort(TYPE_LEN); // type size
+            td.writeInt(TYPE_MOD); // type modifier
             td.writeShort(TEXT_FORMAT);
         }
         buf.writeByte('T');
@@ -98,14 +99,14 @@ public final class PostgresWireEncoder {
     // ── Non-SELECT (INSERT / UPDATE / DELETE / DDL) ──────────────────────────
 
     public static ByteBuf encodeUpdateResult(ByteBufAllocator alloc,
-                                              String commandTag,
-                                              int affectedRows) {
+            String commandTag,
+            int affectedRows) {
         ByteBuf buf = alloc.buffer(32);
-        String tag  = switch (commandTag.toUpperCase()) {
+        String tag = switch (commandTag.toUpperCase()) {
             case "INSERT" -> "INSERT 0 " + affectedRows;
             case "UPDATE" -> "UPDATE " + affectedRows;
             case "DELETE" -> "DELETE " + affectedRows;
-            default       -> commandTag; // DDL tags like "CREATE TABLE"
+            default -> commandTag; // DDL tags like "CREATE TABLE"
         };
         writeCommandComplete(buf, alloc, tag);
         buf.writeBytes(readyForQuery(alloc));
@@ -115,14 +116,17 @@ public final class PostgresWireEncoder {
     // ── ErrorResponse ('E') ──────────────────────────────────────────────────
 
     public static ByteBuf encodeError(ByteBufAllocator alloc,
-                                       String severity,
-                                       String sqlState,
-                                       String message) {
+            String severity,
+            String sqlState,
+            String message) {
         ByteBuf body = alloc.buffer(64);
-        body.writeByte('S'); writeNullString(body, severity);
-        body.writeByte('C'); writeNullString(body, sqlState);
-        body.writeByte('M'); writeNullString(body, message);
-        body.writeByte(0);   // terminator
+        body.writeByte('S');
+        writeNullString(body, severity);
+        body.writeByte('C');
+        writeNullString(body, sqlState);
+        body.writeByte('M');
+        writeNullString(body, message);
+        body.writeByte(0); // terminator
 
         ByteBuf buf = alloc.buffer(body.readableBytes() + 5);
         buf.writeByte('E');
@@ -137,8 +141,8 @@ public final class PostgresWireEncoder {
     // ── Private helpers ───────────────────────────────────────────────────────
 
     private static void writeCommandComplete(ByteBuf dest,
-                                              ByteBufAllocator alloc,
-                                              String tag) {
+            ByteBufAllocator alloc,
+            String tag) {
         byte[] tagBytes = (tag + '\0').getBytes(StandardCharsets.UTF_8);
         dest.writeByte('C');
         dest.writeInt(tagBytes.length + 4);
