@@ -17,8 +17,13 @@ import net.sf.jsqlparser.statement.delete.Delete;
 import net.sf.jsqlparser.statement.insert.Insert;
 import net.sf.jsqlparser.statement.select.Select;
 import net.sf.jsqlparser.statement.update.Update;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class PostgresCommandDecoder extends ByteToMessageDecoder {
+
+    private static final Logger log = LoggerFactory.getLogger(PostgresCommandDecoder.class);
+    private static final int SSL_REQUEST_CODE = 80877103; // 0x04D2162F
 
     private final SessionManager sessionManager;
     private boolean startupComplete = false;
@@ -29,24 +34,36 @@ public class PostgresCommandDecoder extends ByteToMessageDecoder {
     }
 
     private void handleStartup(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {
-        int length = in.readInt();
-        in.skipBytes(length - 4);
-        startupComplete = true;
+        // Both SSLRequest and StartupMessage start with a 4-byte length followed by
+        // a 4-byte code. Read both before deciding how to respond.
+        if (in.readableBytes() < 8) return;
 
-        // Derive a stable session ID from the channel's unique ID
+        int length = in.readInt();
+        int code   = in.readInt();
+
+        // SSLRequest magic: length=8, code=80877103 (0x04D2162F)
+        if (length == 8 && code == SSL_REQUEST_CODE) {
+            // Tell the client we don't support SSL — single byte 'N'
+            ByteBuf response = ctx.alloc().buffer(1);
+            response.writeByte('N');
+            ctx.writeAndFlush(response);
+            // Leave startupComplete = false so the next packet (real startup) is handled
+            return;
+        }
+
+        // Real StartupMessage: skip remaining parameter bytes (length - 8 already read)
+        if (length > 8) {
+            in.skipBytes(length - 8);
+        }
+        startupComplete = true;
         sessionId = ctx.channel().id().asLongText();
 
-        // Create and persist the session asynchronously
         SessionState session = SessionState.authenticated(sessionId, "client", "shadowdb");
         sessionManager.save(session).whenComplete((v, ex) -> {
-            if (ex != null) {
-                // Non-fatal: proxy continues even if Redis is temporarily down
-                ctx.channel().attr(io.netty.util.AttributeKey.valueOf("sessionId"))
-                        .set(sessionId);
-            }
+            if (ex != null) log.warn("Session save failed: {}", ex.getMessage());
         });
 
-        // Respond immediately: AuthenticationOk ('R') then ReadyForQuery ('Z')
+        // AuthenticationOk ('R') + ReadyForQuery ('Z')
         ByteBuf response = ctx.alloc().buffer(13);
         response.writeByte('R');
         response.writeInt(8);
@@ -135,8 +152,19 @@ public class PostgresCommandDecoder extends ByteToMessageDecoder {
             return CommandType.DELETE;
         if (upper.startsWith("BEGIN")
                 || upper.startsWith("COMMIT")
-                || upper.startsWith("ROLLBACK"))
+                || upper.startsWith("ROLLBACK")
+                || upper.startsWith("SAVEPOINT")
+                || upper.startsWith("RELEASE"))
             return CommandType.CONTROL;
-        return CommandType.DDL;
+        if (upper.startsWith("CREATE")
+                || upper.startsWith("DROP")
+                || upper.startsWith("ALTER")
+                || upper.startsWith("TRUNCATE")
+                || upper.startsWith("RENAME"))
+            return CommandType.DDL;
+        // Unknown or unparseable — treat as CONTROL (no cache invalidation)
+        log.warn("Unrecognised SQL prefix, treating as CONTROL to avoid cache wipe: [{}]",
+                upper.length() > 60 ? upper.substring(0, 60) + "..." : upper);
+        return CommandType.CONTROL;
     }
 }
