@@ -1,6 +1,114 @@
 # Shadow Proxy
 
-A high-performance, stateless database proxy for PostgreSQL, built with Java 21 and Netty. Shadow Proxy sits transparently between your application and PostgreSQL, providing read-write splitting, two-level query caching, session management, circuit breaking, and a full async audit trail — all without the application knowing the proxy exists.
+A Java 21 / Netty PostgreSQL proxy prototype with read-write routing, two-level
+query caching, connection pooling, circuit breaking, and asynchronous audit events.
+See the limitations below before using it with application workloads.
+
+## Monitoring and unit tests
+
+Shadow Proxy exports JVM and application metrics on a **separate HTTP port**.
+The `monitoring` Docker Compose profile provides Prometheus and Grafana, with a
+preconfigured **Shadow Proxy Overview** dashboard. No Spring Boot is required.
+
+### Run the tests
+
+Use Java 21 and Maven:
+
+```powershell
+mvn test
+mvn verify
+```
+
+`mvn test` runs the JUnit Jupiter / Mockito suite without PostgreSQL, Redis,
+RabbitMQ, or Docker. `mvn verify` also packages the application and writes the
+JaCoCo HTML coverage report to `target/site/jacoco/index.html`.
+
+The suite covers routing/fallback, the circuit-breaker state machine, L1 caching,
+cache hit/miss/error paths, simple-query decoding, wire response encoding,
+backend success/error/rejection metrics, connection counts, and the HTTP scrape
+endpoint. Netty handlers use `EmbeddedChannel`; the metrics endpoint test uses a
+temporary loopback port. Mockito uses its subclass mock maker so tests do not
+require dynamic Java-agent attachment.
+
+These tests are a starting point, not proof of complete PostgreSQL compatibility.
+The previously identified transaction, cache consistency, SQL normalization,
+startup fragmentation, multiple-in-flight-query, and replica recovery limitations
+remain separate development work. The PowerShell integration suite still requires
+the real infrastructure and is not run by `mvn test`.
+
+### Option A: run the proxy on Windows, monitoring in Docker
+
+Start Docker Desktop, then the existing infrastructure and monitoring services:
+
+```powershell
+docker compose --profile monitoring up -d postgres-primary postgres-replica redis rabbitmq prometheus grafana
+mvn package -DskipTests
+$env:METRICS_HOST = '0.0.0.0'
+java --enable-preview -jar target/shadow-proxy-1.0.0-SNAPSHOT.jar
+```
+
+The native metrics listener defaults to `127.0.0.1:9400`. Setting `METRICS_HOST`
+to `0.0.0.0` lets the Prometheus container reach it through `host.docker.internal`.
+Use this override on a trusted development network; the endpoint has no authentication.
+The environment variable only affects the current PowerShell session and its children.
+Ensure the proxy and monitoring stack agree on the port if overriding `METRICS_PORT`.
+
+### Option B: run everything in Docker
+
+```powershell
+mvn package -DskipTests
+docker compose --profile proxy --profile monitoring up -d --build
+```
+
+The proxy container binds metrics internally on `0.0.0.0:9400` and publishes them
+only on host loopback. The same Prometheus configuration works with either option
+on Docker Desktop. On Linux, use a directly reachable container target
+(`shadow-proxy:9400`) in `monitoring/prometheus/prometheus.yml` for option B;
+host-gateway cannot reach a port published only on Linux host loopback.
+
+Open:
+
+| Service | URL | Credentials |
+|---|---|---|
+| Grafana | http://localhost:3000 | `admin` / `shadow-local-dev` (local development defaults) |
+| Prometheus | http://localhost:9090 | None |
+| Proxy metrics | http://localhost:9400/metrics | None |
+
+Grafana's **Shadow Proxy** folder contains the dashboard automatically. Override
+`GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` before the first Grafana startup
+to choose different initial credentials. Grafana persists users and settings in a
+volume, so changing these environment variables does not reset an existing password.
+Prometheus and Grafana publish their ports only on host loopback.
+
+### What the dashboard measures
+
+- Proxy process CPU and system CPU, shown separately.
+- JVM heap/non-heap memory, heap maximum/committed memory, direct/mapped buffers,
+  garbage-collection pauses, and platform threads. JVM memory is not total resident
+  process RAM, and platform thread counts do not represent all virtual threads.
+- Open client TCP connections, counted from connect to disconnect, including
+  clients that have not completed PostgreSQL startup.
+- HikariCP active/idle/maximum connections, pool waiters, and average acquisition
+  time, separately for primary and replica.
+- Incoming query rate, backend attempts/outcomes, outstanding backend tasks,
+  backend latency p50/p95/p99, cache lookups/hit ratios, and circuit state.
+
+Backend latency includes pool acquisition, execution, and response encoding; it
+excludes cache hits and client socket delivery. It is not end-to-end latency.
+Backend tasks include queries waiting for a JDBC connection. Circuit state is
+`0=CLOSED`, `1=OPEN`, `2=HALF_OPEN`; scraping never advances the circuit state.
+Metrics labels contain bounded command types, node names, cache layers, and outcomes,
+never raw SQL or session identifiers.
+
+The dashboard refreshes every five seconds. Rate panels need multiple scrapes;
+latency/error/GC panels can have no data until the corresponding events occur.
+Check `up{job="shadow-proxy"}` in Prometheus when the dashboard is empty. A value
+of `1` confirms scrape reachability, not backend database readiness.
+
+For overall container memory/CPU and network I/O, also use `docker stats` when the
+proxy runs in Docker. This does not supply the application connection counters.
+
+---
 
 ---
 

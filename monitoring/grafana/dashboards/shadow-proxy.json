@@ -1,0 +1,872 @@
+{
+  "uid": "shadow-proxy-overview",
+  "title": "Shadow Proxy Overview",
+  "tags": [
+    "shadow-proxy",
+    "java",
+    "netty"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Proxy scrape health",
+      "description": "Prometheus reachability, not database readiness.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=\"shadow-proxy\"}",
+          "legendFormat": "Reachable (1 = yes)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "CPU utilization",
+      "description": "JVM process CPU and operating-system CPU are different measurements.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "process_cpu_usage{job=\"shadow-proxy\"}",
+          "legendFormat": "Proxy process",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "system_cpu_usage{job=\"shadow-proxy\"}",
+          "legendFormat": "System",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "JVM memory used",
+      "description": "Heap and non-heap memory. This is not total resident process RAM.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (area) (jvm_memory_used_bytes{job=\"shadow-proxy\"})",
+          "legendFormat": "{{area}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "JVM heap limit and committed memory",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(jvm_memory_max_bytes{job=\"shadow-proxy\",area=\"heap\"})",
+          "legendFormat": "Heap maximum",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "sum(jvm_memory_committed_bytes{job=\"shadow-proxy\",area=\"heap\"})",
+          "legendFormat": "Heap committed",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "NIO direct and mapped buffers",
+      "description": "JVM buffer-pool estimates; not a complete accounting of native memory.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (id) (jvm_buffer_memory_used_bytes{job=\"shadow-proxy\"})",
+          "legendFormat": "{{id}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Client connections",
+      "description": "Includes connected clients before startup. Separate from pooled database connections.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "shadow_client_connections{job=\"shadow-proxy\"}",
+          "legendFormat": "Open frontend TCP connections",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Database pool connections",
+      "description": "HikariCP metrics have a pool label: pool-primary or pool-replica-1.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "hikaricp_connections_active{job=\"shadow-proxy\"}",
+          "legendFormat": "{{pool}} active",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "hikaricp_connections_idle{job=\"shadow-proxy\"}",
+          "legendFormat": "{{pool}} idle",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        },
+        {
+          "refId": "C",
+          "expr": "hikaricp_connections_max{job=\"shadow-proxy\"}",
+          "legendFormat": "{{pool}} maximum",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Pool waiters and backend work",
+      "description": "Outstanding tasks include waiting for a JDBC connection; cache hits bypass these tasks.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "hikaricp_connections_pending{job=\"shadow-proxy\"}",
+          "legendFormat": "{{pool}} waiting for connection",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "shadow_backend_inflight{job=\"shadow-proxy\"}",
+          "legendFormat": "Backend tasks outstanding",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Incoming queries per second",
+      "description": "Counts decoded commands before cache lookup, including cache hits.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (type) (rate(shadow_queries_received_total{job=\"shadow-proxy\"}[$__rate_interval]))",
+          "legendFormat": "{{type}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Backend attempts per second",
+      "description": "Includes successful executions, backend errors, and circuit rejections. Cache hits are excluded.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (node, outcome) (rate(shadow_backend_query_seconds_count{job=\"shadow-proxy\"}[$__rate_interval]))",
+          "legendFormat": "{{node}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Backend latency percentiles",
+      "description": "Pool acquisition + SQL execution + response encoding. Not end-to-end client latency. Appears after traffic.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le, node) (rate(shadow_backend_query_seconds_bucket{job=\"shadow-proxy\",outcome!=\"rejected\"}[$__rate_interval])))",
+          "legendFormat": "{{node}} p50",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le, node) (rate(shadow_backend_query_seconds_bucket{job=\"shadow-proxy\",outcome!=\"rejected\"}[$__rate_interval])))",
+          "legendFormat": "{{node}} p95",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le, node) (rate(shadow_backend_query_seconds_bucket{job=\"shadow-proxy\",outcome!=\"rejected\"}[$__rate_interval])))",
+          "legendFormat": "{{node}} p99",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Backend errors and rejections per second",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (node, outcome) (rate(shadow_backend_query_seconds_count{job=\"shadow-proxy\",outcome!=\"success\"}[$__rate_interval]))",
+          "legendFormat": "{{node}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Cache lookups per second",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (layer, result) (rate(shadow_cache_lookups_total{job=\"shadow-proxy\"}[$__rate_interval]))",
+          "legendFormat": "{{layer}} {{result}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Cache hit ratio by layer",
+      "description": "L2 ratio is conditional on reaching L2; idle periods show zero.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (layer) (rate(shadow_cache_lookups_total{job=\"shadow-proxy\",result=\"hit\"}[$__rate_interval])) / clamp_min(sum by (layer) (rate(shadow_cache_lookups_total{job=\"shadow-proxy\"}[$__rate_interval])), 0.000001)",
+          "legendFormat": "{{layer}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Circuit state",
+      "description": "0 = CLOSED, 1 = OPEN, 2 = HALF_OPEN. Scraping does not change circuit state.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 56,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "shadow_circuit_state{job=\"shadow-proxy\"}",
+          "legendFormat": "{{node}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Garbage collection pause time per second",
+      "description": "Only appears after the JVM reports garbage-collection events.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 56,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(jvm_gc_pause_seconds_sum{job=\"shadow-proxy\"}[$__rate_interval]))",
+          "legendFormat": "GC pause seconds / second",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "JVM platform threads",
+      "description": "These JVM thread counters do not count all Java 21 virtual threads.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 64,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "jvm_threads_live_threads{job=\"shadow-proxy\"}",
+          "legendFormat": "Live platform threads",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "jvm_threads_daemon_threads{job=\"shadow-proxy\"}",
+          "legendFormat": "Daemon platform threads",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Average database connection acquisition time",
+      "description": "Average wait to borrow a database connection, by pool. Not SQL execution time.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shadow-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 64,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(hikaricp_connections_acquire_seconds_sum{job=\"shadow-proxy\"}[$__rate_interval]) / clamp_min(rate(hikaricp_connections_acquire_seconds_count{job=\"shadow-proxy\"}[$__rate_interval]), 0.000001)",
+          "legendFormat": "{{pool}} average",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "shadow-prometheus"
+          }
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  }
+}

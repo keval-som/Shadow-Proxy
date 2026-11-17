@@ -8,6 +8,7 @@ import com.shadow.proxy.routing.NodeRegistry;
 import com.shadow.proxy.routing.RoutingStrategy;
 import com.shadow.proxy.telemetry.AuditEvent;
 import com.shadow.proxy.telemetry.RabbitMQAuditProducer;
+import com.shadow.proxy.telemetry.ProxyMetrics;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -20,6 +21,7 @@ import java.sql.ResultSet;
 import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * Terminal inbound handler — executes SQL against the real PostgreSQL instance.
@@ -45,15 +47,25 @@ public class BackendHandler extends ChannelInboundHandlerAdapter {
     private final RoutingStrategy                    router;
     private final Map<String, BackendConnectionPool> pools;
     private final RabbitMQAuditProducer              auditProducer;
+    private final ProxyMetrics metrics;
+    private final Executor executor;
 
     public BackendHandler(NodeRegistry nodeRegistry,
                           RoutingStrategy router,
                           Map<String, BackendConnectionPool> pools,
-                          RabbitMQAuditProducer auditProducer) {
+                          RabbitMQAuditProducer auditProducer, ProxyMetrics metrics) {
+        this(nodeRegistry, router, pools, auditProducer, metrics, JDBC_EXECUTOR);
+    }
+
+    BackendHandler(NodeRegistry nodeRegistry, RoutingStrategy router,
+                   Map<String, BackendConnectionPool> pools, RabbitMQAuditProducer auditProducer,
+                   ProxyMetrics metrics, Executor executor) {
         this.nodeRegistry  = nodeRegistry;
         this.router        = router;
         this.pools         = pools;
         this.auditProducer = auditProducer;
+        this.metrics = metrics;
+        this.executor = executor;
     }
 
     @Override
@@ -64,7 +76,19 @@ public class BackendHandler extends ChannelInboundHandlerAdapter {
         }
 
         // Submit blocking JDBC work to a virtual thread — never block I/O loop
-        JDBC_EXECUTOR.execute(() -> executeCommand(ctx, command));
+        metrics.backendStarted();
+        try {
+            executor.execute(() -> {
+                try {
+                    executeCommand(ctx, command);
+                } finally {
+                    metrics.backendFinished();
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            metrics.backendFinished();
+            throw e;
+        }
     }
 
     @Override
@@ -78,11 +102,13 @@ public class BackendHandler extends ChannelInboundHandlerAdapter {
     // ── Private ───────────────────────────────────────────────────────────────
 
     private void executeCommand(ChannelHandlerContext ctx, DatabaseCommand command) {
+        long startedNanos = System.nanoTime();
         BackendNode     target  = router.route(command);
         CircuitBreaker  breaker = nodeRegistry.breakerFor(target);
 
         // Circuit open → fail fast
         if (!breaker.allowRequest()) {
+            metrics.recordBackend(target.id(), command.type(), "rejected", System.nanoTime() - startedNanos);
             log.warn("Circuit OPEN for node={}, rejecting command", target.id());
             ByteBuf err = PostgresWireEncoder.encodeError(
                     ctx.alloc(), "ERROR", "53300",
@@ -93,11 +119,13 @@ public class BackendHandler extends ChannelInboundHandlerAdapter {
 
         BackendConnectionPool pool = pools.get(target.id());
         if (pool == null) {
+            metrics.recordBackend(target.id(), command.type(), "error", System.nanoTime() - startedNanos);
             writeError(ctx, "08001", "No connection pool for node: " + target.id());
             return;
         }
 
         long start = System.currentTimeMillis();
+        String outcome = "success";
         try (Connection conn = pool.getConnection()) {
             ByteBuf response = dispatch(ctx, conn, command);
             long latency = System.currentTimeMillis() - start;
@@ -109,6 +137,7 @@ public class BackendHandler extends ChannelInboundHandlerAdapter {
             log.debug("Query executed on node={} latency={}ms sql={}",
                     target.id(), latency, abbreviated(command.sql()));
         } catch (Exception e) {
+            outcome = "error";
             long latency = System.currentTimeMillis() - start;
             breaker.recordFailure();
             log.error("JDBC error on node={}: {}", target.id(), e.getMessage());
@@ -116,6 +145,8 @@ public class BackendHandler extends ChannelInboundHandlerAdapter {
                     command.sessionId(), command.type(),
                     command.sql(), target.id(), latency, e.getMessage()));
             writeError(ctx, "08006", e.getMessage());
+        } finally {
+            metrics.recordBackend(target.id(), command.type(), outcome, System.nanoTime() - startedNanos);
         }
     }
 

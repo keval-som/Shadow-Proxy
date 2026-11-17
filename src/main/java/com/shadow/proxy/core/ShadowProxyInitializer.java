@@ -11,6 +11,8 @@ import com.shadow.proxy.routing.NodeRegistry;
 import com.shadow.proxy.routing.RoutingStrategy;
 import com.shadow.proxy.state.SessionManager;
 import com.shadow.proxy.telemetry.RabbitMQAuditProducer;
+import com.shadow.proxy.telemetry.ProxyMetrics;
+import com.shadow.proxy.telemetry.ConnectionMetricsHandler;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.socket.SocketChannel;
@@ -26,6 +28,7 @@ public class ShadowProxyInitializer extends ChannelInitializer<SocketChannel> {
     private final RoutingStrategy                    router;
     private final Map<String, BackendConnectionPool> pools;
     private final RabbitMQAuditProducer              auditProducer;
+    private final ProxyMetrics metrics;
 
     public ShadowProxyInitializer(SessionManager sessionManager,
                                    L1CaffeineCache l1Cache,
@@ -33,7 +36,7 @@ public class ShadowProxyInitializer extends ChannelInitializer<SocketChannel> {
                                    NodeRegistry nodeRegistry,
                                    RoutingStrategy router,
                                    Map<String, BackendConnectionPool> pools,
-                                   RabbitMQAuditProducer auditProducer) {
+                                   RabbitMQAuditProducer auditProducer, ProxyMetrics metrics) {
         this.sessionManager = sessionManager;
         this.l1Cache        = l1Cache;
         this.l2Cache        = l2Cache;
@@ -41,6 +44,7 @@ public class ShadowProxyInitializer extends ChannelInitializer<SocketChannel> {
         this.router         = router;
         this.pools          = pools;
         this.auditProducer  = auditProducer;
+        this.metrics = metrics;
     }
 
     @Override
@@ -49,7 +53,8 @@ public class ShadowProxyInitializer extends ChannelInitializer<SocketChannel> {
 
         pipeline.addLast("decoder", new PostgresCommandDecoder(sessionManager));
         pipeline.addLast("encoder", new PostgresResponseEncoder());
-        pipeline.addLast("cache",   new CacheHandler(l1Cache, l2Cache));
-        pipeline.addLast("backend", new BackendHandler(nodeRegistry, router, pools, auditProducer));
+        pipeline.addLast("metrics", new ConnectionMetricsHandler(metrics));
+        pipeline.addLast("cache",   new CacheHandler(l1Cache, l2Cache, metrics));
+        pipeline.addLast("backend", new BackendHandler(nodeRegistry, router, pools, auditProducer, metrics));
     }
 }

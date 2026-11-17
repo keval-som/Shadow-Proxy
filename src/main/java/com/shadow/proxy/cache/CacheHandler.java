@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 
 import com.shadow.proxy.protocol.CommandType;
 import com.shadow.proxy.protocol.DatabaseCommand;
+import com.shadow.proxy.telemetry.ProxyMetrics;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelDuplexHandler;
@@ -36,13 +37,15 @@ public class CacheHandler extends ChannelDuplexHandler {
 
     private final L1CaffeineCache l1;
     private final L2RedisCache l2;
+    private final ProxyMetrics metrics;
 
     // Set when a SELECT misses cache; cleared after the response is written
     private String pendingCacheKey = null;
 
-    public CacheHandler(L1CaffeineCache l1, L2RedisCache l2) {
+    public CacheHandler(L1CaffeineCache l1, L2RedisCache l2, ProxyMetrics metrics) {
         this.l1 = l1;
         this.l2 = l2;
+        this.metrics = metrics;
     }
 
     // ── Inbound: client sends a SQL command ──────────────────────────────────
@@ -66,24 +69,29 @@ public class CacheHandler extends ChannelDuplexHandler {
         // ── L1 check ─────────────────────────────────────────────────────────
         Optional<byte[]> l1Hit = l1.get(key);
         if (l1Hit.isPresent()) {
+            metrics.cacheLookup("l1", "hit");
             log.debug("Cache L1 HIT sql={}", abbreviated(command.sql()));
             writeBytes(ctx, l1Hit.get());
             return; // do NOT call super — pipeline stops here
         }
 
         // ── L2 check (async, must not block the I/O thread) ──────────────────
+        metrics.cacheLookup("l1", "miss");
         l2.get(key).whenComplete((l2Hit, ex) -> {
             if (ex != null) {
+                metrics.cacheLookup("l2", "error");
                 log.warn("L2 cache GET error, passing through: {}", ex.getMessage());
                 passThrough(ctx, msg, key);
                 return;
             }
             if (l2Hit.isPresent()) {
+                metrics.cacheLookup("l2", "hit");
                 log.debug("Cache L2 HIT sql={}", abbreviated(command.sql()));
                 byte[] bytes = l2Hit.get();
                 l1.put(key, bytes); // warm L1 from L2
                 ctx.executor().execute(() -> writeBytes(ctx, bytes));
             } else {
+                metrics.cacheLookup("l2", "miss");
                 log.debug("Cache MISS sql={}", abbreviated(command.sql()));
                 passThrough(ctx, msg, key);
             }

@@ -9,6 +9,8 @@ import com.shadow.proxy.routing.NodeRegistry;
 import com.shadow.proxy.routing.ReadWriteRoutingStrategy;
 import com.shadow.proxy.state.SessionManager;
 import com.shadow.proxy.telemetry.RabbitMQAuditProducer;
+import com.shadow.proxy.telemetry.ProxyMetrics;
+import com.shadow.proxy.telemetry.MetricsServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,6 +33,7 @@ public class ShadowProxyApplication {
 
     public static void main(String[] args) throws Exception {
         Properties cfg = loadConfig();
+        ProxyMetrics metrics = new ProxyMetrics();
 
         // ── Backend nodes ─────────────────────────────────────────────────────
         BackendNode primary = new BackendNode(
@@ -46,6 +49,8 @@ public class ShadowProxyApplication {
                 BackendNode.NodeRole.REPLICA);
 
         NodeRegistry nodeRegistry = new NodeRegistry(primary, List.of(replica));
+        metrics.observeCircuit(nodeRegistry.breakerFor(primary));
+        metrics.observeCircuit(nodeRegistry.breakerFor(replica));
 
         // ── Connection pools (one per node) ───────────────────────────────────
         String dbName  = cfg.getProperty("db.name",     "shadowdb");
@@ -54,10 +59,10 @@ public class ShadowProxyApplication {
         int    maxPool = Integer.parseInt(cfg.getProperty("pool.primary.max-size", "20"));
 
         BackendConnectionPool primaryPool = new BackendConnectionPool(
-                primary, dbName, dbUser, dbPass, maxPool);
+                primary, dbName, dbUser, dbPass, maxPool, metrics.registry());
         BackendConnectionPool replicaPool = new BackendConnectionPool(
                 replica, dbName, dbUser, dbPass,
-                Integer.parseInt(cfg.getProperty("pool.replica.max-size", "20")));
+                Integer.parseInt(cfg.getProperty("pool.replica.max-size", "20")), metrics.registry());
 
         Map<String, BackendConnectionPool> pools = Map.of(
                 primary.id(), primaryPool,
@@ -98,22 +103,34 @@ public class ShadowProxyApplication {
 
         ShadowProxyServer server = new ShadowProxyServer(
                 proxyPort, sessionManager, l1Cache, l2Cache,
-                nodeRegistry, router, pools, auditProducer);
+                nodeRegistry, router, pools, auditProducer, metrics);
+        MetricsServer metricsServer = new MetricsServer(
+                cfg.getProperty("metrics.host", "127.0.0.1"),
+                Integer.parseInt(cfg.getProperty("metrics.port", "9400")), metrics);
 
         // Graceful shutdown on SIGTERM / Ctrl+C
         Runtime.getRuntime().addShutdownHook(Thread.ofVirtual().unstarted(() -> {
             log.info("Shutdown signal received");
+            metricsServer.close();
             server.shutdown();
             auditProducer.close();
             l2Cache.close();
             sessionManager.close();
             primaryPool.close();
             replicaPool.close();
+            metrics.close();
             log.info("Shadow Proxy stopped cleanly");
         }));
 
         log.info("Starting Shadow Proxy on port {}", proxyPort);
-        server.start(); // blocks until channel closes
+        metricsServer.start();
+        log.info("Prometheus metrics listening on {}:{} /metrics",
+                cfg.getProperty("metrics.host", "127.0.0.1"), metricsServer.port());
+        try {
+            server.start(); // blocks until channel closes
+        } finally {
+            metricsServer.close();
+        }
     }
 
     // ── Config loader ─────────────────────────────────────────────────────────

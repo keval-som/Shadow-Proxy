@@ -9,15 +9,16 @@ FROM eclipse-temurin:21-jre-alpine
 LABEL maintainer="shadow-proxy"
 LABEL description="High-Performance Stateless Protocol-Aware Database Proxy"
 
-RUN addgroup -S shadow && adduser -S shadow -G shadow
+# Use an application-specific name: Alpine can already contain the system group 'shadow'.
+RUN addgroup -S shadowproxy && adduser -S shadowproxy -G shadowproxy
 
 WORKDIR /app
 
 COPY target/shadow-proxy-1.0.0-SNAPSHOT.jar shadow-proxy.jar
 
-RUN mkdir -p logs && chown -R shadow:shadow /app
+RUN mkdir -p logs && chown -R shadowproxy:shadowproxy /app
 
-USER shadow
+USER shadowproxy
 
 EXPOSE 5432
 

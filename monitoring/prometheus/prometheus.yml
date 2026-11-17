@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: shadow-proxy
+    metrics_path: /metrics
+    static_configs:
+      # Works for a native proxy or the proxy container's published 9400 port.
+      - targets: [host.docker.internal:9400]

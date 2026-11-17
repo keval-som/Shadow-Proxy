@@ -3,6 +3,8 @@ package com.shadow.proxy.backend;
 import com.shadow.proxy.routing.BackendNode;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import com.zaxxer.hikari.metrics.micrometer.MicrometerMetricsTrackerFactory;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,6 +27,11 @@ public class BackendConnectionPool {
                                   String username,
                                   String password,
                                   int maxPoolSize) {
+        this(node, dbName, username, password, maxPoolSize, null);
+    }
+
+    public BackendConnectionPool(BackendNode node, String dbName, String username,
+                                 String password, int maxPoolSize, MeterRegistry registry) {
         this.node = node;
 
         HikariConfig config = new HikariConfig();
@@ -38,6 +45,9 @@ public class BackendConnectionPool {
         config.setIdleTimeout(600_000);
         config.setMaxLifetime(1_800_000);
         config.setPoolName("pool-" + node.id());
+        if (registry != null) {
+            config.setMetricsTrackerFactory(new MicrometerMetricsTrackerFactory(registry));
+        }
 
         // Validate connections on borrow
         config.setConnectionTestQuery("SELECT 1");

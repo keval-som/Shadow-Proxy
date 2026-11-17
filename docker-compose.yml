@@ -119,7 +119,10 @@ services:
       - proxy
     ports:
       - "5432:5432"
+      - "127.0.0.1:9400:9400"
     environment:
+      METRICS_HOST: 0.0.0.0
+      METRICS_PORT: 9400
       PROXY_HOST: 0.0.0.0
       PROXY_PORT: 5432
       DB_PRIMARY_HOST: postgres-primary
@@ -149,8 +152,42 @@ services:
       - shadow-net
     restart: unless-stopped
 
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    container_name: shadow-prometheus
+    profiles: [monitoring]
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [shadow-net]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: shadow-grafana
+    profiles: [monitoring]
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-shadow-local-dev}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on: [prometheus]
+    networks: [shadow-net]
+    restart: unless-stopped
+
 # ─────────────────────────────────────────────────────────────────────────────
 volumes:
+  prometheus_data:
+  grafana_data:
   postgres_primary_data:
   postgres_replica_data:
   redis_data:

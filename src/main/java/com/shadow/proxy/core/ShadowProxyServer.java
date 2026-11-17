@@ -14,6 +14,7 @@ import com.shadow.proxy.routing.NodeRegistry;
 import com.shadow.proxy.routing.RoutingStrategy;
 import com.shadow.proxy.state.SessionManager;
 import com.shadow.proxy.telemetry.RabbitMQAuditProducer;
+import com.shadow.proxy.telemetry.ProxyMetrics;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.PooledByteBufAllocator;
@@ -35,6 +36,7 @@ public class ShadowProxyServer {
     private final RoutingStrategy                    router;
     private final Map<String, BackendConnectionPool> pools;
     private final RabbitMQAuditProducer              auditProducer;
+    private final ProxyMetrics metrics;
 
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
@@ -46,7 +48,7 @@ public class ShadowProxyServer {
                               NodeRegistry nodeRegistry,
                               RoutingStrategy router,
                               Map<String, BackendConnectionPool> pools,
-                              RabbitMQAuditProducer auditProducer) {
+                              RabbitMQAuditProducer auditProducer, ProxyMetrics metrics) {
         this.port           = port;
         this.sessionManager = sessionManager;
         this.l1Cache        = l1Cache;
@@ -55,6 +57,7 @@ public class ShadowProxyServer {
         this.router         = router;
         this.pools          = pools;
         this.auditProducer  = auditProducer;
+        this.metrics = metrics;
     }
 
     public void start() throws Exception {
@@ -71,7 +74,7 @@ public class ShadowProxyServer {
                     .childOption(ChannelOption.SO_KEEPALIVE, true)
                     .childOption(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT)
                     .childHandler(new ShadowProxyInitializer(
-                            sessionManager, l1Cache, l2Cache, nodeRegistry, router, pools, auditProducer));
+                            sessionManager, l1Cache, l2Cache, nodeRegistry, router, pools, auditProducer, metrics));
 
             ChannelFuture future = bootstrap.bind(port).sync();
             log.info("Shadow Proxy listening on port {}", port);
