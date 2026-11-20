@@ -6,6 +6,9 @@ See the limitations below before using it with application workloads.
 
 ## Monitoring and unit tests
 
+For timed load tests with configurable concurrent clients (for example 10, 50, and
+100 users for 30 seconds or 1 minute), see [the load-test runner](test/load/README.md).
+
 Shadow Proxy exports JVM and application metrics on a **separate HTTP port**.
 The `monitoring` Docker Compose profile provides Prometheus and Grafana, with a
 preconfigured **Shadow Proxy Overview** dashboard. No Spring Boot is required.
